@@ -3,6 +3,10 @@
 
 set working-directory := "resource"
 
+# just 在 Windows 上默认调用 sh。常见 PATH 只有 Git\cmd，没有 sh.exe。
+[windows]
+set shell := ["cmd.exe", "/c"]
+
 # 列出可用命令
 [private]
 default:
