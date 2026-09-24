@@ -112,9 +112,10 @@ From the repository root, use `just`. It only wraps the npm scripts. It does not
 just install
 just dev
 just build
+just install-app
 ```
 
-`just install` runs `npm ci --cache ../environment/npm-cache` in `resource/`. `just dev` and `just build` select `dev:win` / `dev:mac` or `build:win` / `build:mac` from the host OS. Linux prints `仅支持 Windows 与 macOS。` and exits 1. The underlying commands, from `resource/`, remain:
+`just install` runs `npm ci --cache ../environment/npm-cache` in `resource/`. `just dev` and `just build` select `dev:win` / `dev:mac` or `build:win` / `build:mac` from the host OS. `just install-app` copies the already built repo-root artifact for the current user. It does not build, and it does not load the VS environment. Windows copies `CodexTimeZoneLauncher.exe` to `%LocalAppData%\Programs\CodexTimeZoneLauncher\` and writes Start Menu shortcut `Codex 时区启动器.lnk`. macOS replaces `~/Applications/Codex 时区启动器.app`. It does not copy `data/settings.json`. Linux prints `仅支持 Windows 与 macOS。` and exits 1. The underlying commands, from `resource/`, remain:
 
 ```powershell
 cd resource
@@ -122,6 +123,7 @@ npm ci --cache ../environment/npm-cache
 npm run dev:win
 npm run build:win
 npm run start:win
+npm run install:win
 ```
 
 What those scripts do:
@@ -130,6 +132,7 @@ What those scripts do:
 - CI calls `node desktop.mjs build win --configured` because the runner already has the toolchain. Use `--configured` locally only when that environment is already loaded. Do not copy the CI command onto a machine that still needs `desktop.ps1`.
 - `build:frontend` runs `vue-tsc --noEmit && vite build`. Tauri calls it before packaging. A frontend-only build has no native backend. Port `1420` must be free for `dev:*` because Vite sets `strictPort`.
 - `start:*` opens the repo-root artifact. It fails until the matching build exists. `start` does not load the VS environment. `just` does not wrap `start`.
+- `install:*` installs that artifact for the current user. It fails until the matching build exists. It does not load the VS environment. `just install-app` wraps it.
 - `npm run tauri` bypasses `desktop.mjs`. It skips the OS check, cache redirect, icon override, `--locked`, and artifact copy. `tauri.conf.json` sets `bundle.targets` to `all`. `desktop.mjs` forces macOS `--bundles app` and Windows `--no-bundle`. Do not use `npm run tauri` for a release build.
 
 `desktop.mjs` writes artifacts to the repository root:
