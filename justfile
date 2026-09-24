@@ -43,3 +43,19 @@ build:
 build:
     @echo '仅支持 Windows 与 macOS。' >&2
     @exit 1
+
+# 将已构建的桌面应用安装到当前用户
+[windows]
+install-app:
+    npm run install:win
+
+# 将已构建的桌面应用安装到当前用户
+[macos]
+install-app:
+    npm run install:mac
+
+# 仅支持 Windows 与 macOS
+[linux]
+install-app:
+    @echo '仅支持 Windows 与 macOS。' >&2
+    @exit 1
