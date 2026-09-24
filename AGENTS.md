@@ -104,7 +104,7 @@ There is no root `package.json`. Run npm commands in `resource/`, or use `just` 
 
 ## Development Commands
 
-Requirements: Node.js `>=22.12.0`, npm `>=10`, and Rust stable. Windows also needs Visual Studio 2022 Build Tools with the Desktop development with C++ workload, plus WebView2. The initializer accepts only `VsDevCmd.bat` under `CODEX_TZ_DEV_ROOT\VisualStudioBuildTools` or `%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools`. macOS needs Xcode Command Line Tools. CI uses Node 24. There is no `rust-toolchain` file and no Python toolchain. `engines` is not `engine-strict`.
+Requirements: Node.js `>=22.12.0`, npm `>=10`, and Rust stable. Windows also needs Visual Studio with the Desktop development with C++ workload, plus WebView2. The initializer prefers `VsDevCmd.bat` under `CODEX_TZ_DEV_ROOT\VisualStudioBuildTools`, then the newest `vswhere` install that has `Microsoft.VisualStudio.Component.VC.Tools.x86.x64`, then `%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools`. macOS needs Xcode Command Line Tools. CI uses Node 24. There is no `rust-toolchain` file and no Python toolchain. `engines` is not `engine-strict`.
 
 From the repository root, use `just`. It only wraps the npm scripts. It does not call Tauri or Cargo directly, and CI does not use it:
 

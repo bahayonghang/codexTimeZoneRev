@@ -57,7 +57,7 @@ Codex 时区启动器是一款面向 Windows 和 macOS 的桌面工具。它会�
 
 - Node.js 22.12 或更高版本、npm 10 或更高版本
 - Rust stable 工具链
-- Windows：Visual Studio Build Tools、Windows SDK、WebView2 Runtime
+- Windows：带 Desktop development with C++ 的 Visual Studio、Windows SDK、WebView2 Runtime
 - macOS：Xcode Command Line Tools
 
 ### Windows
