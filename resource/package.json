@@ -10,6 +10,8 @@
     "build:win": "node desktop.mjs build win",
     "start:mac": "node desktop.mjs start mac",
     "start:win": "node desktop.mjs start win",
+    "install:mac": "node desktop.mjs install mac",
+    "install:win": "node desktop.mjs install win",
     "dev:frontend": "vite",
     "build:frontend": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",

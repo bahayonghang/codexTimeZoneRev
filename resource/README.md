@@ -13,6 +13,7 @@
 | 开发运行 | `npm run dev:mac` | `npm run dev:win` |
 | 生产构建 | `npm run build:mac` | `npm run build:win` |
 | 启动成品 | `npm run start:mac` | `npm run start:win` |
+| 安装成品 | `npm run install:mac` | `npm run install:win` |
 
 构建产物输出到仓库一级目录。另一端源码和专用依赖通过 Rust 条件编译排除。macOS 开发工具可使用 Homebrew 安装 Node.js 和 Rust。
 
