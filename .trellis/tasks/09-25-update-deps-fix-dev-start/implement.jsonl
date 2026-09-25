@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/09-25-update-deps-fix-dev-start/research/startup-and-dependency-findings.md", "reason": "启动复现、依赖调查和已确认根因"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "修改共享 Windows runner 显示边界前检查现有机制"}

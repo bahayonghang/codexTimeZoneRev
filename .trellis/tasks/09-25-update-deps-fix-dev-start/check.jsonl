@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/09-25-update-deps-fix-dev-start/research/startup-and-dependency-findings.md", "reason": "验收需要复现窗口存在但被遮挡的启动场景"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查窗口显示逻辑是否重复或绕过既有边界"}
