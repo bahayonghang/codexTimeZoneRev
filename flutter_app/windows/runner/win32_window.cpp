@@ -150,7 +150,13 @@ bool Win32Window::Create(const std::wstring& title,
 }
 
 bool Win32Window::Show() {
-  return ShowWindow(window_handle_, SW_SHOWNORMAL);
+  const bool was_visible = ShowWindow(window_handle_, SW_SHOWNORMAL);
+  // Keep the runner window visible and bring it in front of the launching
+  // terminal/editor when the first Flutter frame is ready.
+  SetWindowPos(window_handle_, HWND_TOP, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+  SetForegroundWindow(window_handle_);
+  return was_visible;
 }
 
 // static
