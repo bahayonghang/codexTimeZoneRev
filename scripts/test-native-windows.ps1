@@ -3,7 +3,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'windows-rust.ps1')
 if (!$FlutterSdk) { $FlutterSdk = $env:FLUTTER_ROOT }
+if (!$FlutterSdk) { $FlutterSdk = [Environment]::GetEnvironmentVariable('FLUTTER_ROOT', 'User') }
 if (!$FlutterSdk) {
     $dartCommand = Get-Command dart.bat -ErrorAction SilentlyContinue
     if ($dartCommand) { $FlutterSdk = Split-Path -Parent (Split-Path -Parent $dartCommand.Source) }
@@ -15,16 +17,18 @@ $env:PATH = "$(Join-Path $FlutterSdk 'bin');$env:PATH"
 $env:CARGO_TARGET_DIR = Join-Path $projectRoot 'environment\flutter-cargo-target'
 $cachedCargo = Join-Path $projectRoot 'environment\cargo'
 if (Test-Path -LiteralPath $cachedCargo) { $env:CARGO_HOME = $cachedCargo }
+$cargo = Resolve-RustTool 'cargo'
+$rustc = Resolve-RustTool 'rustc'
 function Invoke-Checked([string]$Program, [string[]]$Arguments) {
     & $Program @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Program failed ($LASTEXITCODE)." }
 }
-Invoke-Checked 'cargo' @('build', '--release', '--manifest-path', (Join-Path $projectRoot 'native\launcher_core\Cargo.toml'))
+Invoke-Checked $cargo @('build', '--release', '--manifest-path', (Join-Path $projectRoot 'native\launcher_core\Cargo.toml'))
 $fixtureRoot = Join-Path $projectRoot ('environment\native-acceptance-' + [guid]::NewGuid().ToString('N'))
 $clientRoot = Join-Path $fixtureRoot '模拟 客户端'
 New-Item -ItemType Directory -Path $clientRoot -Force | Out-Null
 New-Item -ItemType File -Path (Join-Path $fixtureRoot '.acceptance-fixture'), (Join-Path $clientRoot '.test-client'), (Join-Path $clientRoot 'icudtl.dat') | Out-Null
-Invoke-Checked 'rustc' @('--edition=2021', '--crate-name', 'codex_fixture', (Join-Path $projectRoot 'flutter_app\tool\fixtures\codex.rs'), '-o', (Join-Path $clientRoot 'Codex.exe'))
+Invoke-Checked $rustc @('--edition=2021', '--crate-name', 'codex_fixture', (Join-Path $projectRoot 'flutter_app\tool\fixtures\codex.rs'), '-o', (Join-Path $clientRoot 'Codex.exe'))
 Push-Location (Join-Path $projectRoot 'flutter_app')
 try {
     Invoke-Checked $dart @('compile', 'exe', 'tool/native_acceptance.dart', '-o', (Join-Path $fixtureRoot 'acceptance.exe'))

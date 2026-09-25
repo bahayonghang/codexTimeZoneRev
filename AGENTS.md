@@ -197,7 +197,7 @@ bash scripts/flutter-macos.sh run
 bash scripts/flutter-macos.sh build
 ```
 
-Windows scripts locate Flutter through `FLUTTER_ROOT` or `flutter.bat` on `PATH` and accept `-FlutterSdk`. They set Cargo output under `environment/flutter-cargo-target` and reuse `environment/cargo` when present. macOS uses the same Cargo target directory through environment variables.
+Windows scripts locate Flutter through `FLUTTER_ROOT` (process or user scope) or `flutter.bat` on `PATH` and accept `-FlutterSdk`. They resolve the active rustup Cargo executable through `scripts/windows-rust.ps1` before falling back to `PATH`, set Cargo output under `environment/flutter-cargo-target`, and reuse `environment/cargo` when present. macOS uses the same Cargo target directory through environment variables.
 
 Build outputs are written under `flutter_app/build/` and packaged into `environment/artifacts/`. Do not commit caches, generated runner files, local settings, logs, or archives.
 

@@ -5,7 +5,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'windows-rust.ps1')
 if (!$FlutterSdk) { $FlutterSdk = $env:FLUTTER_ROOT }
+if (!$FlutterSdk) { $FlutterSdk = [Environment]::GetEnvironmentVariable('FLUTTER_ROOT', 'User') }
 if (!$FlutterSdk) {
     $flutterCommand = Get-Command flutter.bat -ErrorAction SilentlyContinue
     if ($flutterCommand) { $FlutterSdk = Split-Path -Parent (Split-Path -Parent $flutterCommand.Source) }
@@ -17,6 +19,7 @@ $env:PATH = "$(Join-Path $FlutterSdk 'bin');$env:PATH"
 $env:CARGO_TARGET_DIR = Join-Path $projectRoot 'environment\flutter-cargo-target'
 $cachedCargo = Join-Path $projectRoot 'environment\cargo'
 if (Test-Path -LiteralPath $cachedCargo) { $env:CARGO_HOME = $cachedCargo }
+$cargo = Resolve-RustTool 'cargo'
 function Invoke-Checked([string]$Program, [string[]]$Arguments) {
     & $Program @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Program failed ($LASTEXITCODE)." }
@@ -27,7 +30,7 @@ try {
     Invoke-Checked $flutter @('pub', 'get')
     if ($Action -eq 'install') { return }
     if ($Action -eq 'test') {
-        Invoke-Checked 'cargo' @('test', '--manifest-path', (Join-Path $projectRoot 'native\launcher_core\Cargo.toml'))
+        Invoke-Checked $cargo @('test', '--manifest-path', (Join-Path $projectRoot 'native\launcher_core\Cargo.toml'))
         Invoke-Checked $flutter @('analyze')
         Invoke-Checked $flutter @('test')
         return
@@ -36,7 +39,7 @@ try {
         Invoke-Checked $flutter @('run', '-d', 'windows', '--dart-define=UI_PREVIEW=true')
         return
     }
-    Invoke-Checked 'cargo' @('build', '--release', '--manifest-path', (Join-Path $projectRoot 'native\launcher_core\Cargo.toml'))
+    Invoke-Checked $cargo @('build', '--release', '--manifest-path', (Join-Path $projectRoot 'native\launcher_core\Cargo.toml'))
     $env:CODEX_TZ_NATIVE_LIBRARY = Join-Path $env:CARGO_TARGET_DIR 'release\codex_timezone_core.dll'
     if ($Action -eq 'run') {
         Invoke-Checked $flutter @('run', '-d', 'windows')
