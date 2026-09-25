@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "安装与构建入口会新增脚本和命令别名，需避免复制平台构建逻辑并保持单一职责"}
