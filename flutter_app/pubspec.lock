@@ -185,10 +185,10 @@ packages:
     dependency: "direct main"
     description:
       name: forui
-      sha256: ab4bbf472bee5d972ac1a3f3ae707362b83ca563fa9d334a15470a367902318a
+      sha256: "9630b92bb356ce44e3f4fcc9d569bd0d13663d0081b86e37f469f0abb6b6636f"
       url: "https://pub.dev"
     source: hosted
-    version: "0.27.0"
+    version: "0.27.1"
   forui_lucide:
     dependency: transitive
     description:
@@ -462,10 +462,10 @@ packages:
     dependency: "direct main"
     description:
       name: timezone
-      sha256: dd14a3b83cfd7cb19e7888f1cbc20f258b8d71b54c06f79ac585f14093a287d1
+      sha256: "981d1020d6ef8fe1e7b3de5054e5b25579ae7c403d7734adc508ffc47668e9cb"
       url: "https://pub.dev"
     source: hosted
-    version: "0.10.1"
+    version: "0.11.1"
   typed_data:
     dependency: transitive
     description:
@@ -478,10 +478,10 @@ packages:
     dependency: transitive
     description:
       name: vector_math
-      sha256: "1d774bbdf6b72a0b12122fc1560c9c2d2a67db5a4a4cc2bd8a5c990ab20e3188"
+      sha256: "92b9910f66ed1057fd4da7b040ae7c74cafacf885bdc81be496928d5049b032d"
       url: "https://pub.dev"
     source: hosted
-    version: "2.4.0"
+    version: "2.4.3"
   vm_service:
     dependency: transitive
     description:

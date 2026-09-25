@@ -10,10 +10,10 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
-  forui: 0.27.0
+  forui: 0.27.1
   ffi: ^2.1.4
   file_selector: ^1.0.3
-  timezone: ^0.10.1
+  timezone: ^0.11.1
   path: ^1.9.1
   shared_preferences: ^2.5.3
   flutter_acrylic: 1.1.4
