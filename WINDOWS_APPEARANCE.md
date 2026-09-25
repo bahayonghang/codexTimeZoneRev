@@ -28,6 +28,8 @@
 
 原生属性检查读到 DWMWA_SYSTEMBACKDROP_TYPE=3，即 Desktop Acrylic。材质受系统“透明效果”、高对比度及系统合成策略影响；原生属性验证不等同于所有桌面场景的视觉验收。Windows 10 的插件兼容路径仍需验证。
 
+窗口失焦后，这个背景类型保持为 3，DWM 停止采样背后的画面，标题栏和透明页面变成实色。2026-09-25 在 Windows 11 25H2 build 26200.9550 上用洋红色背景窗口核对过：获焦标题栏读到 `223,0,223`，失焦读到 `84,84,84`。`WCA_FORCE_ACTIVEWINDOW_APPEARANCE` 不能在失焦时恢复采样。把背景改成 `DWMSBT_NONE` 后再用 `ACCENT_ENABLE_BLURBEHIND` 或旧的 Accent Acrylic，获焦标题栏也不再采样背后的窗口。因此当前版本继续只在获焦时显示 Desktop Acrylic，失焦实色是这条系统材质的结果。文字和控件仍然不透明。
+
 插件初始化失败时使用实色主题；手动禁用材质：
 
 ```powershell
