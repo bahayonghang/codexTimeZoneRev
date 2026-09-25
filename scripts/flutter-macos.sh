@@ -2,13 +2,21 @@
 set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 action="${1:-build}"
+case "$action" in
+  doctor | deps | test | preview | run | build) ;;
+  *)
+    printf '未知动作：%s\n' "$action" >&2
+    exit 1
+    ;;
+esac
 cd "$project_root/flutter_app"
 if [[ "$action" == doctor ]]; then
   flutter doctor -v
   exit 0
 fi
 flutter pub get
-if [[ "$action" == install ]]; then
+if [[ "$action" == deps ]]; then
+  printf '依赖安装完成；如需构建并安装桌面应用，请运行 just install。\n'
   exit 0
 fi
 export CARGO_TARGET_DIR="$project_root/environment/flutter-cargo-target"

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('doctor', 'install', 'test', 'build', 'run', 'preview')]
+    [ValidateSet('doctor', 'deps', 'test', 'build', 'run', 'preview')]
     [string]$Action = 'run',
     [string]$FlutterSdk = ''
 )
@@ -19,7 +19,6 @@ $env:PATH = "$(Join-Path $FlutterSdk 'bin');$env:PATH"
 $env:CARGO_TARGET_DIR = Join-Path $projectRoot 'environment\flutter-cargo-target'
 $cachedCargo = Join-Path $projectRoot 'environment\cargo'
 if (Test-Path -LiteralPath $cachedCargo) { $env:CARGO_HOME = $cachedCargo }
-$cargo = Resolve-RustTool 'cargo'
 function Invoke-Checked([string]$Program, [string[]]$Arguments) {
     & $Program @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Program failed ($LASTEXITCODE)." }
@@ -28,8 +27,12 @@ Push-Location (Join-Path $projectRoot 'flutter_app')
 try {
     if ($Action -eq 'doctor') { Invoke-Checked $flutter @('doctor', '-v'); return }
     Invoke-Checked $flutter @('pub', 'get')
-    if ($Action -eq 'install') { return }
+    if ($Action -eq 'deps') {
+        Write-Output '依赖安装完成；如需构建并安装桌面应用，请运行 just install。'
+        return
+    }
     if ($Action -eq 'test') {
+        $cargo = Resolve-RustTool 'cargo'
         Invoke-Checked $cargo @('test', '--manifest-path', (Join-Path $projectRoot 'native\launcher_core\Cargo.toml'))
         Invoke-Checked $flutter @('analyze')
         Invoke-Checked $flutter @('test')
@@ -39,6 +42,7 @@ try {
         Invoke-Checked $flutter @('run', '-d', 'windows', '--dart-define=UI_PREVIEW=true')
         return
     }
+    $cargo = Resolve-RustTool 'cargo'
     Invoke-Checked $cargo @('build', '--release', '--manifest-path', (Join-Path $projectRoot 'native\launcher_core\Cargo.toml'))
     $env:CODEX_TZ_NATIVE_LIBRARY = Join-Path $env:CARGO_TARGET_DIR 'release\codex_timezone_core.dll'
     if ($Action -eq 'run') {
