@@ -23,13 +23,17 @@
 推荐在仓库根目录使用统一入口：
 
 ```text
-just install
+just help
+just deps
 just doctor
 just preview
 just dev
 just test
 just build
+just install
 ```
+
+`just deps` 只安装 Flutter 锁定依赖；`just install` 会先构建并打包 Release，再将应用安装到当前用户目录。`just install-app` 是 `just install` 的兼容别名。Windows 默认安装到 `%LOCALAPPDATA%\Programs\CodexTimeZoneLauncher` 并创建开始菜单快捷方式；macOS 默认安装到 `~/Applications/Codex 时区启动器.app`。安装前请退出已安装的启动器；Windows 升级会保留 `data/settings.json`。
 
 `just preview` 使用固定演示数据；`just dev` 会构建 Rust 原生库并启动真实开发会话。Windows 还会提供不启动真实 Codex 的隔离原生验收：
 
@@ -41,18 +45,22 @@ just native-test
 
 ```powershell
 # Windows
+.\scripts\flutter-windows.ps1 -Action deps
 .\scripts\flutter-windows.ps1 -Action test
 .\scripts\test-native-windows.ps1
 .\scripts\flutter-windows.ps1 -Action build
+.\scripts\install-windows.ps1
 ```
 
 ```bash
 # macOS
+bash scripts/flutter-macos.sh deps
 bash scripts/flutter-macos.sh test
 bash scripts/flutter-macos.sh build
+bash scripts/install-macos.sh
 ```
 
-构建产物位于 `environment/artifacts/`。发布版的 Windows/macOS 云端构建仅由 GitHub Release 的发布事件触发；向 `main` 推送代码不会启动此工作流。构建完成后，ZIP 会附加到该 Release。
+构建产物位于 `environment/artifacts/`；执行 `just install` 后还会得到当前用户可运行的安装结果。发布版的 Windows/macOS 云端构建仅由 GitHub Release 的发布事件触发；向 `main` 推送代码不会启动此工作流。构建完成后，ZIP 会附加到该 Release。
 
 ## 项目结构
 

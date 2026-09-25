@@ -164,42 +164,49 @@ Use `just` from the repository root:
 
 | Command | Behavior |
 | --- | --- |
-| `just install` | Run `flutter pub get` through the platform script |
+| `just help` | Show the available recipes and their meanings |
+| `just deps` | Install locked Flutter dependencies without building or installing the app |
 | `just doctor` | Show Flutter toolchain diagnostics |
 | `just preview` | Run with fixed preview data and no real system actions |
 | `just dev` | Build the Rust library and start the real Flutter development session |
 | `just test` | Run Rust tests, `flutter analyze`, and Flutter tests |
 | `just build` | Build, sign where applicable, and package the current platform |
+| `just install` | Build, package, and install the app for the current user |
+| `just install-app` | Compatibility alias for `just install` |
 | `just native-test` | Run the Windows isolated native acceptance test without launching real Codex |
 
-`just --list` is the authoritative recipe summary. `just install-app` was intentionally removed with the old Tauri application; release distribution uses ZIP files in `environment/artifacts/`.
+`just --list` and `just help` are the authoritative recipe summaries. `just deps` is deliberately separate from `just install`: the latter performs a real current-user installation. Windows installs to `%LOCALAPPDATA%\Programs\CodexTimeZoneLauncher` and creates a Start Menu shortcut; macOS installs to `~/Applications/Codex 时区启动器.app`. The Windows installer preserves `data/settings.json` during upgrades.
 
-The justfile is only a dispatcher. Do not duplicate Flutter or packaging logic there. On Windows it uses `cmd.exe` plus PowerShell 7 and must not require `sh.exe`.
+The justfile is only a dispatcher. Do not duplicate Flutter, packaging, or installation logic there. On Windows it uses `cmd.exe` plus PowerShell 7 and must not require `sh.exe`.
 
 Direct platform entry points remain available and are used by CI:
 
 ```powershell
 # Windows
+.\scripts\flutter-windows.ps1 -Action deps
 .\scripts\flutter-windows.ps1 -Action doctor
 .\scripts\flutter-windows.ps1 -Action test
 .\scripts\flutter-windows.ps1 -Action preview
 .\scripts\flutter-windows.ps1 -Action run
 .\scripts\flutter-windows.ps1 -Action build
+.\scripts\install-windows.ps1
 .\scripts\test-native-windows.ps1
 ```
 
 ```bash
 # macOS
+bash scripts/flutter-macos.sh deps
 bash scripts/flutter-macos.sh doctor
 bash scripts/flutter-macos.sh test
 bash scripts/flutter-macos.sh preview
 bash scripts/flutter-macos.sh run
 bash scripts/flutter-macos.sh build
+bash scripts/install-macos.sh
 ```
 
 Windows scripts locate Flutter through `FLUTTER_ROOT` (process or user scope) or `flutter.bat` on `PATH` and accept `-FlutterSdk`. They resolve the active rustup Cargo executable through `scripts/windows-rust.ps1` before falling back to `PATH`, set Cargo output under `environment/flutter-cargo-target`, and reuse `environment/cargo` when present. macOS uses the same Cargo target directory through environment variables.
 
-Build outputs are written under `flutter_app/build/` and packaged into `environment/artifacts/`. Do not commit caches, generated runner files, local settings, logs, or archives.
+Build outputs are written under `flutter_app/build/` and packaged into `environment/artifacts/`. The platform installer scripts own the separate current-user installation transaction. Do not commit caches, generated runner files, local settings, logs, or archives.
 
 ## Code Conventions
 
@@ -271,19 +278,24 @@ It creates a fake Codex executable under ignored `environment/` paths and does n
 For script changes, also verify:
 
 ```powershell
+just help
 just --list
+just --dry-run deps
 just --dry-run install
+just --dry-run install-app
 just --dry-run doctor
 just --dry-run preview
 just --dry-run dev
 just --dry-run test
 just --dry-run build
+just --dry-run native-test
 $null = [scriptblock]::Create((Get-Content -Raw scripts/flutter-windows.ps1))
+$null = [scriptblock]::Create((Get-Content -Raw scripts/install-windows.ps1))
 $null = [scriptblock]::Create((Get-Content -Raw scripts/test-native-windows.ps1))
 git diff --check
 ```
 
-If Bash is available, run `bash -n scripts/flutter-macos.sh`. Full macOS launch, build, signing, and archive verification must be repeated on macOS; Windows dry-run is not a substitute.
+If Bash is available, run `bash -n scripts/flutter-macos.sh scripts/install-macos.sh`. Full macOS launch, build, signing, installation, and archive verification must be repeated on macOS; Windows dry-run is not a substitute.
 
 Untested or platform-sensitive paths must not be assumed safe: real client discovery and launch, file selection, clipboard integration, public network transports, PAC/WPAD proxy resolution, Dream Skin helpers, FFI packaging, and macOS signing.
 
@@ -291,9 +303,11 @@ Untested or platform-sensitive paths must not be assumed safe: real client disco
 
 | File | Why it matters |
 | --- | --- |
-| `justfile` | Stable cross-platform command dispatcher; contains no build logic |
+| `justfile` | Stable cross-platform command dispatcher; contains no build or installation logic |
 | `scripts/flutter-windows.ps1` | Windows dependency, test, run, build, and archive behavior |
 | `scripts/flutter-macos.sh` | macOS dependency, test, run, sign, build, and archive behavior |
+| `scripts/install-windows.ps1` | Windows current-user installation transaction and settings preservation |
+| `scripts/install-macos.sh` | macOS current-user app-bundle installation transaction and signature checks |
 | `scripts/test-native-windows.ps1` | Isolated Windows native acceptance without a real client |
 | `flutter_app/lib/main.dart` | Preview selection and application bootstrap |
 | `flutter_app/lib/app/application.dart` | Backend, controller, appearance, and theme composition |
