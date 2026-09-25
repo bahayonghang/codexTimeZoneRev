@@ -5,12 +5,23 @@
 ## 环境
 
 - Flutter 3.47.5 / Dart 3.13.4，Forui 0.27.0（由 `pubspec.lock` 固定）。
-- Rust stable；Windows 需要 Visual Studio C++ 桌面工具链，macOS 需要完整 Xcode。
+- Rust stable 与 `just`；Windows 需要 PowerShell 7 和 Visual Studio C++ 桌面工具链，macOS 需要完整 Xcode。
 - 将 Flutter 的 `bin`、Cargo 加入 `PATH`。Windows 也可设置 `FLUTTER_ROOT` 或向脚本传入 `-FlutterSdk`。依赖缓存使用工具默认位置，也可通过 `PUB_CACHE` 自行指定。
 
 ## Windows
 
-在仓库根目录运行：
+推荐在仓库根目录运行：
+
+```text
+just doctor
+just test
+just preview
+just dev
+just build
+just native-test
+```
+
+也可以直接调用平台脚本：
 
 ```powershell
 .\scripts\flutter-windows.ps1 -Action doctor
@@ -21,20 +32,33 @@
 .\scripts\test-native-windows.ps1
 ```
 
-`preview` 使用固定演示数据，不保存设置或访问外部应用。`run` 使用实际配置与原生后端，启动界面时会查询公网信息。`test-native-windows.ps1` 在忽略提交的 `environment/` 目录内创建隔离测试客户端，不启动真实客户端。
+`preview` 使用固定演示数据，不保存设置或访问外部应用。`just dev` 对应脚本的 `run`：使用实际配置与原生后端，启动界面时会查询公网信息。`test-native-windows.ps1` 在忽略提交的 `environment/` 目录内创建隔离测试客户端，不启动真实客户端。
 
 便携 ZIP 为 `environment/artifacts/CodexTimeZone-Flutter-windows-x64.zip`。解压后运行 `codex_timezone.exe`，保留整个目录。直接执行 `flutter run` 前，需要自行编译 Rust 核心，并将 `CODEX_TZ_NATIVE_LIBRARY` 指向生成的 DLL。
 
 ## macOS
 
+推荐在仓库根目录运行：
+
+```text
+just doctor
+just test
+just preview
+just dev
+just build
+```
+
+也可以直接调用平台脚本：
+
 ```bash
+bash scripts/flutter-macos.sh doctor
 bash scripts/flutter-macos.sh test
 bash scripts/flutter-macos.sh preview
 bash scripts/flutter-macos.sh run
 bash scripts/flutter-macos.sh build
 ```
 
-脚本将 Rust 原生库复制进应用并对本地构建进行临时签名，ZIP 位于 `environment/artifacts/`。已在 Apple Silicon Mac 上完成构建、签名检查和 Dream Skin 重新注入验证；Developer ID 签名、公证及其他机器上的回归仍待完成。当前没有通用二进制包承诺。
+`just dev` 对应脚本的 `run`。脚本将 Rust 原生库复制进应用并对本地构建进行临时签名，ZIP 位于 `environment/artifacts/`。已在 Apple Silicon Mac 上完成构建、签名检查和 Dream Skin 重新注入验证；Developer ID 签名、公证及其他机器上的回归仍待完成。当前没有通用二进制包承诺。
 
 ## 配置与限制
 

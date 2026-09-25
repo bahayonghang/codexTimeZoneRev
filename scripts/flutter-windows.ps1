@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('doctor', 'test', 'build', 'run', 'preview')]
+    [ValidateSet('doctor', 'install', 'test', 'build', 'run', 'preview')]
     [string]$Action = 'run',
     [string]$FlutterSdk = ''
 )
@@ -25,6 +25,7 @@ Push-Location (Join-Path $projectRoot 'flutter_app')
 try {
     if ($Action -eq 'doctor') { Invoke-Checked $flutter @('doctor', '-v'); return }
     Invoke-Checked $flutter @('pub', 'get')
+    if ($Action -eq 'install') { return }
     if ($Action -eq 'test') {
         Invoke-Checked 'cargo' @('test', '--manifest-path', (Join-Path $projectRoot 'native\launcher_core\Cargo.toml'))
         Invoke-Checked $flutter @('analyze')

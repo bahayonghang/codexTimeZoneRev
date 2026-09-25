@@ -24,237 +24,288 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## Project Overview
 
-Codex 时区启动器 is a Windows and macOS desktop launcher. It starts the Codex or ChatGPT desktop client with a process-level `TZ`. It does not change the operating-system timezone. The current app version is `0.1.2`. The project is independent MIT software. It is not an OpenAI product.
+Codex 时区启动器 is a Windows and macOS desktop launcher built with Flutter, Forui, and a Rust native core. It starts the Codex or ChatGPT desktop client with a process-level `TZ`; it does not change the operating-system timezone. The current app version is `0.2.0`. The project is independent MIT software and is not an OpenAI product.
 
-The app does four jobs:
+The app:
 
-- It finds or accepts a desktop client path.
-- It saves a timezone draft.
-- It launches that client with `TZ` set.
-- It can open Codex Dream Skin. When compatibility is enabled, launch attaches a local debugging port before skin apply.
+- Discovers or accepts a desktop client path.
+- Saves a timezone draft.
+- Launches the client with `TZ` set.
+- Creates a desktop shortcut when requested.
+- Opens Dream Skin, applies it during compatible launch, or reapplies it to a compatible running client.
+- Shows local and target clocks and resolves public IP information.
 
-Trust code over `README.md` when they disagree. Known mismatches are listed under Code Conventions.
+The upstream `v0.2.0` migration replaced the former Vue/Tauri application under `resource/` with Flutter and Rust. Do not restore npm, Tauri, Vue, or `resource/` build instructions as current architecture.
 
-`.trellis/spec/frontend/` and `.trellis/spec/backend/` are still init placeholders. Until those files cite this repository, follow this document and the source. Do not add Pinia, an ORM, or a second IPC command to match the templates.
+`.trellis/spec/frontend/` and `.trellis/spec/backend/` are still init placeholders. Until they cite this repository, follow this document and the source. Trust executable code and tests over stale prose.
 
 ## Architecture & Data Flow
 
-One Tauri 2 process hosts a Vue 3 webview and a platform Rust backend. There is one IPC command. There is no separate service, no router, and no Linux backend.
+A Flutter desktop process owns the UI. Dart calls a versioned C ABI implemented by the Rust native core. Network lookup remains a separate Dart path and does not pass through the settings backend.
 
 ```mermaid
 flowchart LR
-  UI["Vue composables"] -->|"invoke backend"| IPC["tauri command backend"]
-  IPC -->|"spawn_blocking plus mutex"| Plat["windows::execute or macos::execute"]
-  Plat --> Disk["settings.json"]
-  Plat -->|"child env TZ"| Client["Codex.exe or .app"]
-  UI -->|"webview fetch"| Net["IP providers then IP125"]
+  Widgets["Flutter widgets"] --> State["LauncherController / NetworkController"]
+  State --> FFI["NativeBackend via Isolate.run"]
+  FFI --> ABI["launcher_call JSON C ABI"]
+  ABI --> Dispatch["Rust dispatch + REQUEST_LOCK"]
+  Dispatch --> Common["shared settings/timezone"]
+  Dispatch --> Win["Windows platform module"]
+  Dispatch --> Mac["macOS platform module"]
+  State --> Net["Dart network transports"]
+  Net --> Providers["IP providers"]
+  Net --> Geo["ip125.com geolocation"]
 ```
 
-`resource/src-tauri/src/main.rs` calls `codextimezonerev_lib::run()`. `resource/src-tauri/src/lib.rs` registers the clipboard, dialog, and opener plugins and one handler:
+### Flutter layer
 
-```rust
-async fn backend(app: AppHandle, command: String, payload: Option<Value>) -> Result<Value, String>
-```
+- `flutter_app/lib/main.dart` initializes timezone data and window material, then starts `LauncherApplication`.
+- `LauncherApplication` selects `PreviewBackend` for preview mode or `NativeBackend` for normal mode.
+- `LauncherController` owns launcher draft state and calls the backend through `LauncherBackend.call`.
+- `NetworkController` independently owns public network state and cache.
+- Appearance is a separate `ValueNotifier` persisted through `shared_preferences` under `flutter-appearance`.
+- Network cache uses `flutter-network-v1`; it is independent of settings and appearance.
 
-The handler takes a process-wide `Mutex`, then runs platform code on `spawn_blocking`. The frontend calls it only through `invoke('backend', { command, payload })` in `resource/src/composables/useLauncher.ts`. No child component calls `invoke`.
+### Native boundary
 
-Platform code is not a Cargo workspace member. `lib.rs` includes it with `#[path]`:
+`flutter_app/lib/services/backend.dart` is the only Dart-to-native settings boundary. It:
 
-- `resource/backend/common.rs` on every target
-- `resource/backend/win/mod.rs` when `cfg(windows)`
-- `resource/backend/mac/mod.rs` when `cfg(target_os = "macos")`
+1. Serializes `{version, command, payload}` as JSON.
+2. Calls `_invoke` through `Isolate.run` so blocking native work does not block Flutter UI.
+3. Loads `codex_timezone_core.dll` or `libcodex_timezone_core.dylib`.
+4. Verifies native ABI version `1`.
+5. Calls `launcher_call` and releases both request and response memory correctly.
 
-Both `execute()` functions accept the same command strings: `bootstrap`, `discover`, `validate`, `save`, `launch`, `create_shortcut`, `launch_dream_skin`, `launch_dream_skin_app`, and `network_info`. An unknown string returns `未知命令：{command}`. Add a command to both match arms, or the other OS fails closed. The UI calls `bootstrap`, `validate`, `save`, `launch`, `create_shortcut`, and `launch_dream_skin`. `discover`, `launch_dream_skin_app`, and `network_info` have no UI caller. There is no Linux `cfg` arm. `call_backend_sync` does not compile on Linux.
+`native/launcher_core/src/lib.rs` owns the public FFI command gate and response envelope. Public commands are:
 
-Primary launch flow:
+- `bootstrap`
+- `discover`
+- `validate`
+- `save`
+- `launch`
+- `create_shortcut`
+- `launch_dream_skin`
+- `reapply_dream_skin`
+- Windows-only `proxy_for_url`, handled before the global lock
 
-1. `App.vue` mounts `useLauncher()`, which calls `bootstrap` unless `?ui-preview=1` is set in a dev build.
-2. `bootstrap` loads settings, embeds `zones.json`, discovers a client, and returns `platform` plus `settingsPath`. `localZone` in that payload is the string `UTC`.
-3. The UI keeps a draft `Settings` ref. `savedSettings` is a JSON snapshot. `dirty` compares those strings.
-4. Save and launch send the full settings object. Shortcut and skin-open also send it, but those commands ignore `settings`.
-5. `tz()` accepts `mode: "zone"` only when `zoneId` is in `zones.json`. It accepts `mode: "offset"` only for integers `-12` through `14`.
-6. Launch refuses when that client is already running. That refusal does not write `settings.json`. Launch does not kill the process.
-7. After the running-client check, launch writes `settings.json`, then spawns the client with `TZ` set and `ELECTRON_RUN_AS_NODE` removed. A later spawn, early-exit, or skin failure leaves the new file on disk. The UI updates `savedSettings` only when the invoke succeeds.
-8. Dream Skin compatibility binds `127.0.0.1:port`, drops that listener, then passes `--remote-debugging-address=127.0.0.1` and `--remote-debugging-port`. Skin helper processes remove `TZ`. Windows also passes `--user-data-dir`. macOS does not. Do not add or remove that flag without changing the external script contract.
+Unknown commands fail before platform initialization. `proxy_for_url` may block on PAC/WPAD and intentionally does not hold `REQUEST_LOCK`. All other accepted commands are serialized by the process-wide mutex.
 
-`windowsId` is catalog metadata for the UI type `Zone`. Launch does not apply a Windows timezone ID. The child timezone is the IANA id, or an `Etc/GMT` value.
+The platform modules still contain compatibility match arms such as `launch_dream_skin_app`, but the FFI whitelist makes them unreachable from the Flutter app. Do not expose them through the ABI without an explicit contract change.
 
-POSIX sign inversion is required. Offset `+8` becomes `Etc/GMT-8`. Offset `-5` becomes `Etc/GMT+5`. Offset `0` becomes `Etc/UTC`. Do not correct that sign.
+### Network paths
 
-Two network paths exist. Do not merge them.
+Do not merge these paths:
 
-- The panel uses `useNetworkInfo()`. The webview fetches domestic and international IP providers, then `https://ip125.com/api/geo/{ip}`. Results can be cached in `localStorage` key `codex-timezone-network-v1`. The button label is `使用此时区`. That action updates the draft only.
-- Rust `network_info()` shells out to `curl` and `https://ipinfo.io/json`. It returns `proxy` and `direct`. The Vue UI does not call this command.
+- `NetworkController` fetches domestic and international IPs, then queries `https://ip125.com/api/geo/{ip}`. Results can be cached but only update the UI draft when the user chooses a detected timezone.
+- On Windows, `SystemProxyResolver` calls native `proxy_for_url` for each destination and configures `HttpClient.findProxy`.
+- On macOS, `MacNetworkTransport` uses the `codex_timezone/network` method channel implemented by the runner.
+- `common::network_info()` shells out to curl and `ipinfo.io`. It is not a public Flutter command and the current UI does not call it.
 
-Appearance is separate from `settings.json`. `useAppearance()` stores `system`, `light`, or `dark` in `localStorage` key `codex-appearance`.
+## Launcher and Persistence Rules
+
+- `LauncherSettings` JSON fields are `mode`, `zoneId`, `offset`, `executable`, and `dreamSkinCompatible`.
+- Rust `Settings` uses camelCase serialization, `#[serde(default)]`, and PascalCase aliases for legacy files. Keep the aliases.
+- Send the full settings object for save and launch. An omitted field becomes its default and can erase a stored path or compatibility flag.
+- `common::load()` accepts a UTF-8 BOM. `common::save()` validates with `tz()` and atomically replaces `settings.json` through `tempfile`.
+- Windows settings live in `data/settings.json` beside the executable. Bootstrap migrates the legacy `%LocalAppData%/ChatGPTTimeZoneLauncher/settings.json` only when the new file is absent.
+- macOS settings live in `~/Library/Application Support/com.fei-away.codextimezone/settings.json`.
+- The UI never writes `settings.json` directly.
+- Preview mode is enabled by `--preview` or `--dart-define=UI_PREVIEW=true`. It must not save settings, launch clients, invoke native system operations, or access real network data.
+- Do not mutate `LauncherSettings` in place. Create a new value with `copyWith` and pass it to `LauncherController.update`.
+
+## Timezone Rules
+
+- `native/launcher_core/src/platform/zones.json` is the allowed IANA catalog and is embedded with `include_str!`.
+- Add a zone there before the UI or native backend can persist it. Keep fractional zones such as `Asia/Kathmandu` in zone mode.
+- Offset mode accepts whole hours from `-12` through `14`.
+- POSIX `Etc/GMT` sign inversion is intentional: `+8` becomes `Etc/GMT-8`; `-5` becomes `Etc/GMT+5`; zero becomes `Etc/UTC`.
+- A public-IP response can contain an IANA id that is absent from `zones.json`. The UI may display or draft it, but save and launch must continue to reject it.
+- `bootstrap` returns `localZone: "UTC"` as a stable backend placeholder. The Flutter clock code uses the local Dart timezone.
+
+## Client and Dream Skin Rules
+
+- Windows validation accepts only `Codex.exe` or `ChatGPT.exe` with a sibling `icudtl.dat`. The stored path is the executable, not its directory.
+- macOS validation requires the `.app` bundle identifier `com.openai.codex`. The Dart file selector returns the application bundle path.
+- Compatible launch binds a loopback debugger port, drops the listener, starts the client with the selected timezone, and passes the platform-specific debugging flags.
+- Windows Dream Skin lives under `%LocalAppData%/CodexDreamSkin` and defaults to port `9335`.
+- macOS Dream Skin is the external `Codex Dream Skin.app`; its state file lives under `~/Library/Application Support/CodexDreamSkinStudio/state.json` and defaults to port `9341`.
+- Do not unify the two platforms' ports, paths, helper names, or signing behavior.
+- Reapplying a skin never restarts the client or changes its timezone. It requires a client previously launched with the compatible debugging endpoint.
 
 ## Key Directories
 
 | Path | Purpose |
 | --- | --- |
-| `resource/src/` | Vue 3 UI. `App.vue` composes the screen. `composables/` owns state. `components/` renders it. `styles/` is plain CSS. |
-| `resource/backend/` | Shared timezone logic plus `win/` and `mac/` platform backends. `zones.json` is the allowed IANA catalog. |
-| `resource/src-tauri/` | Tauri shell, capabilities, icons, and the Cargo package `codextimezonerev`. |
-| `resource/backend/win/` | Windows backend plus dev-only `desktop.ps1` and `Initialize-DevelopmentEnvironment.ps1`. Those scripts are not the Dream Skin runtime. |
-| `.github/workflows/` | Desktop release builds. The workflow does not run tests. |
-| `environment/` | Local npm and Cargo cache created by `desktop.mjs`. Gitignored. Do not commit it. |
-| `docs/` | Gitignored local notes. Absence in git is intentional. |
+| `flutter_app/lib/app/` | Flutter application shell, page, and theme |
+| `flutter_app/lib/domain/` | Settings and zone data contracts |
+| `flutter_app/lib/services/` | FFI backend, desktop services, clocks, network, and window material |
+| `flutter_app/lib/state/` | Launcher state controller |
+| `flutter_app/test/` | Dart unit and widget tests |
+| `flutter_app/windows/`, `flutter_app/macos/` | Flutter desktop runner projects |
+| `native/launcher_core/` | Rust C ABI, shared logic, proxy helper, and platform modules |
+| `scripts/` | Local development, test, acceptance, and packaging scripts |
+| `environment/` | Gitignored caches, Cargo targets, acceptance fixtures, and release artifacts |
+| `.github/workflows/flutter-desktop.yml` | Release-triggered Windows/macOS build workflow |
+| `.trellis/` | Trellis workflow, tasks, specs, and workspace journals |
 
-There is no root `package.json`. Run npm commands in `resource/`, or use `just` from the repository root.
+There is no root npm project and no supported Linux backend.
 
 ## Development Commands
 
-Requirements: Node.js `>=22.12.0`, npm `>=10`, and Rust stable. Windows also needs Visual Studio with the Desktop development with C++ workload, plus WebView2. The initializer prefers `VsDevCmd.bat` under `CODEX_TZ_DEV_ROOT\VisualStudioBuildTools`, then the newest `vswhere` install that has `Microsoft.VisualStudio.Component.VC.Tools.x86.x64`, then `%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools`. macOS needs Xcode Command Line Tools. CI uses Node 24. There is no `rust-toolchain` file and no Python toolchain. `engines` is not `engine-strict`.
+Requirements:
 
-From the repository root, use `just`. It only wraps the npm scripts. It does not call Tauri or Cargo directly, and CI does not use it:
+- Flutter `3.47.5` / Dart `3.13.4` or a compatible newer Flutter stable release allowed by `pubspec.yaml`
+- Rust stable
+- `just`
+- Windows: PowerShell 7 and Visual Studio C++ desktop tools
+- macOS: full Xcode
 
-```text
-just install
-just dev
-just build
-just install-app
-```
+Use `just` from the repository root:
 
-`just install` runs `npm ci --cache ../environment/npm-cache` in `resource/`. `just dev` and `just build` select `dev:win` / `dev:mac` or `build:win` / `build:mac` from the host OS. `just install-app` copies the already built repo-root artifact for the current user. It does not build, and it does not load the VS environment. Windows copies `CodexTimeZoneLauncher.exe` to `%LocalAppData%\Programs\CodexTimeZoneLauncher\` and writes Start Menu shortcut `Codex 时区启动器.lnk`. macOS replaces `~/Applications/Codex 时区启动器.app`. It does not copy `data/settings.json`. Linux prints `仅支持 Windows 与 macOS。` and exits 1. The underlying commands, from `resource/`, remain:
+| Command | Behavior |
+| --- | --- |
+| `just install` | Run `flutter pub get` through the platform script |
+| `just doctor` | Show Flutter toolchain diagnostics |
+| `just preview` | Run with fixed preview data and no real system actions |
+| `just dev` | Build the Rust library and start the real Flutter development session |
+| `just test` | Run Rust tests, `flutter analyze`, and Flutter tests |
+| `just build` | Build, sign where applicable, and package the current platform |
+| `just native-test` | Run the Windows isolated native acceptance test without launching real Codex |
+
+`just --list` is the authoritative recipe summary. `just install-app` was intentionally removed with the old Tauri application; release distribution uses ZIP files in `environment/artifacts/`.
+
+The justfile is only a dispatcher. Do not duplicate Flutter or packaging logic there. On Windows it uses `cmd.exe` plus PowerShell 7 and must not require `sh.exe`.
+
+Direct platform entry points remain available and are used by CI:
 
 ```powershell
-cd resource
-npm ci --cache ../environment/npm-cache
-npm run dev:win
-npm run build:win
-npm run start:win
-npm run install:win
+# Windows
+.\scripts\flutter-windows.ps1 -Action doctor
+.\scripts\flutter-windows.ps1 -Action test
+.\scripts\flutter-windows.ps1 -Action preview
+.\scripts\flutter-windows.ps1 -Action run
+.\scripts\flutter-windows.ps1 -Action build
+.\scripts\test-native-windows.ps1
 ```
 
-What those scripts do:
+```bash
+# macOS
+bash scripts/flutter-macos.sh doctor
+bash scripts/flutter-macos.sh test
+bash scripts/flutter-macos.sh preview
+bash scripts/flutter-macos.sh run
+bash scripts/flutter-macos.sh build
+```
 
-- `dev:*` and `build:*` call `node desktop.mjs`. On Windows, that script first runs `backend/win/desktop.ps1`, which loads the VS environment and re-enters with `--configured`.
-- CI calls `node desktop.mjs build win --configured` because the runner already has the toolchain. Use `--configured` locally only when that environment is already loaded. Do not copy the CI command onto a machine that still needs `desktop.ps1`.
-- `build:frontend` runs `vue-tsc --noEmit && vite build`. Tauri calls it before packaging. A frontend-only build has no native backend. Port `1420` must be free for `dev:*` because Vite sets `strictPort`.
-- `start:*` opens the repo-root artifact. It fails until the matching build exists. `start` does not load the VS environment. `just` does not wrap `start`.
-- `install:*` installs that artifact for the current user. It fails until the matching build exists. It does not load the VS environment. `just install-app` wraps it.
-- `npm run tauri` bypasses `desktop.mjs`. It skips the OS check, cache redirect, icon override, `--locked`, and artifact copy. `tauri.conf.json` sets `bundle.targets` to `all`. `desktop.mjs` forces macOS `--bundles app` and Windows `--no-bundle`. Do not use `npm run tauri` for a release build.
+Windows scripts locate Flutter through `FLUTTER_ROOT` or `flutter.bat` on `PATH` and accept `-FlutterSdk`. They set Cargo output under `environment/flutter-cargo-target` and reuse `environment/cargo` when present. macOS uses the same Cargo target directory through environment variables.
 
-`desktop.mjs` writes artifacts to the repository root:
+Build outputs are written under `flutter_app/build/` and packaged into `environment/artifacts/`. Do not commit caches, generated runner files, local settings, logs, or archives.
 
-- Windows: `CodexTimeZoneLauncher.exe`, copied from `codextimezonerev.exe`
-- macOS: `Codex 时区启动器.app`
+## Code Conventions
 
-Those paths are gitignored. The macOS bundle folder name is hardcoded in `desktop.mjs`. A `productName` change that does not update those paths breaks publish. macOS replaces the `.app` as a whole. If `APPLE_SIGNING_IDENTITY` is unset, the script ad-hoc signs with `codesign --sign -`. If that variable is set, the script does not sign with it. It only verifies. CI does not notarize.
+### Dart and Flutter
 
-Optional environment variables:
+- Use standard Dart formatting: two-space indentation, trailing commas where appropriate, and no unrelated reformatting.
+- User-facing errors and status text are Chinese sentences.
+- Keep `LauncherController` and `NetworkController` separate. Do not introduce a second global state library.
+- Child widgets receive controllers/services and emit callbacks; system operations stay in services or the native boundary.
+- Use `LauncherBackend` for tests and preview injection. Do not call `DynamicLibrary` directly from widgets.
+- Keep network transport abstractions deterministic in tests; close every transport and controller.
+- Do not call real clocks, network services, file selectors, clipboards, or native libraries in widget tests. Inject or fake them.
 
-- `CODEX_TZ_DEV_ROOT`: Windows toolchain root. Expected children are `NodeJS`, `Git\cmd`, `Rust\rustup`, `Rust\cargo`, and `VisualStudioBuildTools\Common7\Tools\VsDevCmd.bat`. `desktop.mjs` still overwrites `CARGO_HOME` to `environment/cargo`. This variable does not keep the Cargo registry in the dev root.
-- `CODEX_TZ_PROXY`: copied to `HTTP_PROXY` and `HTTPS_PROXY`. The PowerShell initializer also sets `CARGO_HTTP_PROXY`.
-- `CARGO_BUILD_TARGET`: must be unset. The script rejects it.
-- `TAURI_DEV_HOST`: Vite uses port `1420` and HMR port `1421`. Do not change the port without `tauri.conf.json`.
+### Rust and FFI
 
-There is no lint script, format script, or `npm test` script. Frontend typecheck is the `vue-tsc --noEmit` step inside `build:frontend`.
+- Rust edition is 2021. Platform errors cross the ABI as Chinese `String` messages.
+- Keep the C ABI versioned and ownership-explicit. Every `launcher_call` response must be released exactly once with `launcher_free`.
+- Reject unknown commands before acquiring the global request lock or touching platform state.
+- Blocking platform work belongs behind the existing FFI call and global lock. Do not call `launcher_call` from the Flutter UI isolate.
+- Add shared behavior tests in `common.rs`; add Windows behavior tests in `win/mod.rs`; add macOS behavior tests in `mac/mod.rs`.
+- Use unique `tempfile::tempdir()` suffixes for parallel tests.
 
-## Code Conventions & Common Patterns
+### Cross-layer contracts
 
-Naming:
+- Keep Dart `LauncherSettings.toJson()` and Rust `Settings` field names aligned.
+- Keep public FFI commands synchronized between `LauncherController.action`, `lib.rs`, and both platform match arms where applicable.
+- Preserve camelCase JSON. PascalCase aliases exist only for legacy persisted settings.
+- When a data contract changes, update Dart serialization, Rust serde, relevant tests, and documentation together.
 
-- Vue components are PascalCase files with `<script setup lang="ts">`.
-- Composables are `useX.ts` and return refs. There is no Pinia, Vuex, `provide`/`inject`, or dependency-injection container.
-- Rust command strings are `snake_case`. Settings fields are `camelCase` in JSON and TypeScript.
-- User-facing errors and status text are Chinese sentences. Keep that language when you add a user-visible failure.
-- Backend functions return `Result<T, String>`. The webview shows `String(error)` as message detail.
-- Frontend TypeScript uses 2-space indent, single quotes, and no semicolons. Match the file you edit. Rust in `common.rs` and `win/mod.rs` is dense. `mac/mod.rs` is expanded.
+## Versioning and Release
 
-State:
+- The Flutter app version is in `flutter_app/pubspec.yaml`; the native crate version is in `native/launcher_core/Cargo.toml`.
+- Refresh `flutter_app/pubspec.lock` through Flutter and `native/launcher_core/Cargo.lock` through Cargo. Do not hand-edit either lockfile.
+- Release ZIPs are portable artifacts. Do not copy local `data/settings.json` or logs into them.
+- `.github/workflows/flutter-desktop.yml` runs only when a GitHub Release is published. It is not a pull-request test workflow.
+- Windows and macOS builds are separate. macOS local builds are ad-hoc signed; Developer ID signing and notarization are not configured.
+- Do not rename the product, runner executable, bundle identifier, or macOS settings directory without updating platform projects and providing a settings migration.
 
-- Draft settings live in a Vue `ref`. Do not write `settings.json` from the webview.
-- `useLauncher()` returns a plain object of refs, not `reactive()`. `App.vue` reads `launcher.settings.value`. Nested refs do not auto-unwrap. Do not switch the template to `launcher.settings` unless you also make the return value reactive.
-- Child components emit patches. The parent writes `{ ...settings, ...patch }`. Do not mutate settings fields in place.
-- Block save and launch while `initializing` or `bootstrapFailed` is set. Preview mode (`import.meta.env.DEV` and `?ui-preview=1`) must not call native dialogs, save, launch, or shortcuts. Related query keys are `ui-mode`, `ui-path`, `ui-theme`, `ui-menu`, and `ui-network`. A production build ignores that short-circuit and still calls `invoke`.
-- One mutex serializes every `backend` call, including Dream Skin waits of 45 seconds plus up to 150 seconds on macOS or 330 seconds on Windows. Do not add a command that waits on another `backend` call.
+## Testing & QA
 
-Persistence:
+Run the broad Flutter workflow when Flutter is available:
 
-- JSON field names are `mode`, `zoneId`, `offset`, `executable`, and `dreamSkinCompatible`.
-- `Settings` uses `#[serde(default)]` and PascalCase aliases such as `Mode` and `ZoneId`. Keep the aliases. Send the full object. An omitted field becomes the default and can wipe `executable` or the skin flag.
-- `load()` strips a UTF-8 BOM. `save()` validates with `tz()`, then atomically replaces `settings.json` through `tempfile`. A rejected save must leave the previous file intact.
-- Windows settings live in `data/settings.json` beside the executable. Dev and installed builds do not share that directory. Migration runs only in `bootstrap`, and only when the new file is absent. The only legacy source is `%LocalAppData%/ChatGPTTimeZoneLauncher/settings.json`.
-- macOS settings live in `~/Library/Application Support/com.fei-away.codextimezone/settings.json`. There is no legacy migration.
-- `bootstrap` returns `localZone: "UTC"`. The UI replaces it with `Intl.DateTimeFormat().resolvedOptions().timeZone`. Do not treat the backend value as the machine zone.
+```text
+just test
+```
 
-Timezone rules:
+The script runs:
 
-- A new IANA zone needs a `zones.json` object with `label`, `id`, and `windowsId`. `tz()` rejects ids that are absent from that file. Keep `Asia/Kathmandu`. The macOS persistence test saves it.
-- `isValidTimeZone()` uses `Intl`. `使用此时区` can therefore put an IP125 id into the draft that `save` or `launch` rejects. Do not widen `tz()` to arbitrary strings.
-- Offset mode is whole hours only. The UI labels are `地区时区` and `固定 UTC 偏移`. Fractional zones such as `Asia/Kathmandu` belong in `地区时区`, not in `offset`.
-- A running-client refusal does not write settings. A failure after the atomic save does write them.
+```text
+cargo test --manifest-path native/launcher_core/Cargo.toml
+flutter analyze
+flutter test
+```
 
-Client identity:
+Run the native crate directly when changing Rust or when Flutter is unavailable:
 
-- Windows `validate` accepts only `Codex.exe` or `ChatGPT.exe` with a sibling `icudtl.dat`. The stored path is that `.exe`. Discovery prefers the newest MSIX package `OpenAI.Codex`, then `%LocalAppData%\Programs\Codex\Codex.exe`, `Codex\Codex.exe`, and `Programs\OpenAI\Codex\Codex.exe`.
-- macOS `validate` requires bundle id `com.openai.codex`. The IPC `path` is the `.app`, not the inner binary. Discovery checks `/Applications` and `~/Applications`, then `mdfind`. Shortcut creation requires a built `.app` ancestor and does not overwrite a different existing desktop entry. A dev binary fails with `开发模式不支持创建快捷方式，请使用构建后的 .app。`.
-- Dream Skin is external. Windows looks in `%LocalAppData%/CodexDreamSkin`, requires `tray-dream-skin.ps1`, `common-windows.ps1`, `theme-windows.ps1`, `localization-windows.ps1`, and `start-dream-skin.ps1`, and defaults to port `9335`. macOS looks for `Codex Dream Skin.app` and `Contents/Resources/engine/scripts/start-dream-skin-macos.sh`, and defaults to port `9341` from `CodexDreamSkinStudio/state.json`. Do not unify those ports or script names. `enable_skin` in `mac/mod.rs` has no caller. Do not treat it as a command.
+```powershell
+cargo test --manifest-path native/launcher_core/Cargo.toml --locked
+```
 
-Frontend boundaries:
+Run Windows isolated native acceptance only when Flutter, Rust, and the Windows toolchain are available:
 
-- MacVue components come from `@macvue/core` `0.1.0`. Menu portals are `#appearance-menu-root`, `#timezone-menu-root`, and `#offset-menu-root`. `AppSelect.vue` stops viewport scroll and locks `.workspace-scroll` while a menu is open. Keep that lock.
-- Component files have no `<style>` blocks. Put visual changes in `resource/src/styles/`.
-- Imports are relative. `tsconfig.json` has no `paths` map. `strict`, `noUnusedLocals`, and `noUnusedParameters` are on. npm dependency versions are exact. Do not introduce `^` ranges.
-- A new webview network host must be added to `connect-src` in `resource/src-tauri/tauri.conf.json`. `curl` hosts do not need a CSP entry. `ipinfo.io` is a curl host. `ip125.com` is a webview host.
-- A new Tauri plugin permission belongs in `resource/src-tauri/capabilities/default.json`. Current grants are `core:default`, clipboard read/write, `opener:default`, and `dialog:allow-open`. The opener plugin is initialized, but `resource/src` does not import it. Clipboard copy writes text and then reads it back.
+```text
+just native-test
+```
 
-README mismatches to ignore when editing code:
+It creates a fake Codex executable under ignored `environment/` paths and does not launch the real Codex client.
 
-- The apply-timezone control is `使用此时区`, not `应用识别时区`. The launch button is `保存并启动 Codex`. The skin button is `打开 Dream Skin`. There is no `应用设置` label.
-- The configured window is `1280×900`, minimum `760×640`. CSS reflow is at `999px`, `759px`, and `520px`. The README sizes `760×900` and `600×800` are not packaged window sizes.
-- The panel does not query proxy and direct exits. That behavior belongs only to unused-by-UI `network_info()`.
-- README offset text is `UTC−12:00` to `UTC+14:00`. The implementation is integer hours, with POSIX `Etc/GMT` sign inversion.
+For script changes, also verify:
+
+```powershell
+just --list
+just --dry-run install
+just --dry-run doctor
+just --dry-run preview
+just --dry-run dev
+just --dry-run test
+just --dry-run build
+$null = [scriptblock]::Create((Get-Content -Raw scripts/flutter-windows.ps1))
+$null = [scriptblock]::Create((Get-Content -Raw scripts/test-native-windows.ps1))
+git diff --check
+```
+
+If Bash is available, run `bash -n scripts/flutter-macos.sh`. Full macOS launch, build, signing, and archive verification must be repeated on macOS; Windows dry-run is not a substitute.
+
+Untested or platform-sensitive paths must not be assumed safe: real client discovery and launch, file selection, clipboard integration, public network transports, PAC/WPAD proxy resolution, Dream Skin helpers, FFI packaging, and macOS signing.
 
 ## Important Files
 
 | File | Why it matters |
 | --- | --- |
-| `resource/desktop.mjs` | Cross-platform dev, build, and start dispatcher. Owns artifact paths and Cargo cache env. |
-| `resource/backend/win/desktop.ps1` | Windows entry that loads VS tools, then re-enters `desktop.mjs --configured`. |
-| `resource/src-tauri/src/lib.rs` | The only IPC boundary and the platform include switch. |
-| `resource/backend/common.rs` | `Settings`, `tz()`, atomic load/save, and shared Dream Skin probe helpers. |
-| `resource/backend/zones.json` | Compile-time catalog via `include_str!`. Invalid JSON fails at `zones()`, not as a type error. |
-| `resource/backend/win/mod.rs` | Windows discovery, validation, launch, shortcut, and Dream Skin. |
-| `resource/backend/mac/mod.rs` | macOS discovery, validation, launch, symlink shortcut, and Dream Skin. |
-| `resource/src/types.ts` | Shared UI contract. Keep it aligned with serde `camelCase`. |
-| `resource/src/composables/useLauncher.ts` | Bootstrap, dirty state, and command gating. |
-| `resource/src/composables/useNetworkInfo.ts` | Webview IP lookup. Independent from Rust `network_info()`. |
-| `resource/src/composables/useClocks.ts` | Target and local preview. Pauses while the document is hidden. Exports `isValidTimeZone`. |
-| `resource/src-tauri/tauri.conf.json` | Product name, identifier, window size, CSP, and frontend commands. |
-| `resource/src-tauri/capabilities/default.json` | Plugin permissions for the `main` window. |
-| `.github/workflows/build-desktop.yml` | macOS ARM64 and Windows x64 release builds. Tag `v*` publishes a GitHub Release. |
-
-Bump `0.1.2` together in `resource/package.json`, `resource/src-tauri/Cargo.toml`, and `resource/src-tauri/tauri.conf.json`. Refresh `package-lock.json` with npm and `Cargo.lock` with Cargo. Do not hand-edit `Cargo.lock`. Nothing checks that the three manifests match. A `v*` tag uses the git tag in the release title. It does not read `0.1.2`. The identifier `com.fei-away.codextimezone` is also the macOS settings directory name. Do not rename the product, identifier, or macOS artifact folder unless you also update `desktop.mjs` and migrate stored settings.
-
-`resource/src-tauri/gen/schemas/` is committed generated ACL output. Do not hand-edit it. It can go stale after a capability change.
-
-## Runtime/Tooling Preferences
-
-- Package manager is npm. The lockfile is `lockfileVersion` 3. Use `npm ci` in `resource/`. Do not add pnpm, Yarn, or Bun.
-- `resource/.npmrc` sets `fund=false` and `audit=false`. There is no `packageManager` field.
-- Rust edition is 2021. Release profile uses one codegen unit, `lto = true`, `panic = "abort"`, and `strip = true`. Do not expect panic backtraces from a release build.
-- Windows release hides the console with `windows_subsystem` in `resource/src-tauri/src/main.rs`.
-- `desktop.mjs` overwrites `CARGO_HOME` and sets `CARGO_TARGET_DIR` under `../environment`, even if the PowerShell initializer set `CARGO_HOME` from `CODEX_TZ_DEV_ROOT`. macOS uses `environment/macos/cargo` and `environment/macos/cargo-target`. Direct `cargo` commands do not use that redirect unless you export it.
-- Do not commit `environment/`, `data/`, `resource/node_modules/`, `resource/dist/`, `resource/**/target/`, `.env`, the root executable, or the root `.app`.
-- `.gitattributes` does not set line endings. Do not add an `eol` rule unless asked. It only sets `merge=union` for Trellis journals.
-- Do not add a path alias, a second state library, or a second IPC command unless the existing `backend` string protocol cannot express the change.
-
-## Testing & QA
-
-Tests are Rust `#[cfg(test)]` modules inside the backend files. There are no `*.test.ts` or `*.spec.ts` files, no Vitest or Playwright config, no coverage tool, and no fixtures directory. `resource/**/coverage/` is gitignored, but nothing writes it.
-
-There is no `npm test` and no `just test`. Run the existing tests from the Tauri package:
-
-```powershell
-cargo test --manifest-path resource/src-tauri/Cargo.toml --locked
-```
-
-On Windows this compiles `common.rs` and `win/mod.rs` only. The compiled tests are `legacy_settings_and_atomic_replace` and `debugger_endpoint_rejects_unrelated_http_service`. The Unix skin-log test and every `mac/mod.rs` test are absent. On macOS the Windows module does not build. `win/mod.rs` has no tests. macOS tests shell out to `/bin/date`, `/usr/bin/plutil`, and `/bin/sh`. They do not run on Windows. `installed_client_and_running_guard` returns immediately when `discover()` is empty, and it can touch a real running client. A pass does not prove the guard.
-
-CI does not run `cargo test`, and it does not run on pull requests. `.github/workflows/build-desktop.yml` runs on `workflow_dispatch`, pushes to `main`, and tags `v*`. It proves that `npm run build:mac` and `node desktop.mjs build win --configured` produce artifacts. The macOS job also runs `codesign --verify`. A green workflow is not test coverage. Push to `main` uploads artifacts. Only a `v*` tag publishes a GitHub Release. CI uses `npm ci` in `resource/`, not `just`, and not the `environment/npm-cache` path.
-
-Add a backend regression in the existing `#[cfg(test)] mod tests` of the file that owns the behavior. Use `use super::*`. Shared tests should use `tempfile::tempdir()`. Do not add `resource/src-tauri/tests/` for a private helper. Those integration tests cannot see `super`. On macOS, do not reuse the temp suffixes `settings`, `bundle`, or `guard`. Those names collide under parallel `cargo test`. Do not add a JavaScript runner for a one-off check. Frontend changes have no automated suite. Use dev preview (`npm run dev:win`, then the Vite URL with `?ui-preview=1`) for layout and copy. Use a real `dev:win` or `dev:mac` session for IPC, path validation, launch, and Dream Skin.
-
-Untested paths you must not assume are safe: the Windows backend, macOS `execute` and skin apply, `network_info`, the Tauri command mutex, webview IP providers, CSP, clock formatting, and the dirty-state gate. `?ui-preview=1` is a manual demo hook, not a test.
+| `justfile` | Stable cross-platform command dispatcher; contains no build logic |
+| `scripts/flutter-windows.ps1` | Windows dependency, test, run, build, and archive behavior |
+| `scripts/flutter-macos.sh` | macOS dependency, test, run, sign, build, and archive behavior |
+| `scripts/test-native-windows.ps1` | Isolated Windows native acceptance without a real client |
+| `flutter_app/lib/main.dart` | Preview selection and application bootstrap |
+| `flutter_app/lib/app/application.dart` | Backend, controller, appearance, and theme composition |
+| `flutter_app/lib/app/launcher_page.dart` | Main launcher UI and user interactions |
+| `flutter_app/lib/domain/settings.dart` | Dart settings JSON contract |
+| `flutter_app/lib/services/backend.dart` | Dart FFI transport and preview backend |
+| `flutter_app/lib/services/network_info.dart` | IP providers, ip125 lookup, and cache |
+| `flutter_app/lib/services/network_transport.dart` | Windows proxy and macOS method-channel transports |
+| `flutter_app/lib/state/launcher_controller.dart` | Draft, saved state, command gating, and status |
+| `native/launcher_core/src/lib.rs` | ABI version, command gate, lock, and JSON envelope |
+| `native/launcher_core/src/platform/common.rs` | Settings, timezone conversion, persistence, and shared helpers |
+| `native/launcher_core/src/platform/win/mod.rs` | Windows discovery, validation, launch, shortcuts, and Dream Skin |
+| `native/launcher_core/src/platform/mac/mod.rs` | macOS discovery, validation, launch, shortcuts, and Dream Skin |
+| `native/launcher_core/src/platform/zones.json` | Allowed IANA timezone catalog |
+| `.github/workflows/flutter-desktop.yml` | Release build and artifact upload contract |

@@ -18,17 +18,36 @@
 
 ## 从源码构建
 
-需要 Flutter 3.47.5（Dart 3.13.4）、Rust stable。Windows 还需要 Visual Studio C++ 桌面工具链；macOS 需要完整 Xcode。将 Flutter 的 `bin` 与 Cargo 加入 `PATH`，或在 Windows 传入 `-FlutterSdk`。
+需要 Flutter 3.47.5（Dart 3.13.4）、Rust stable 和 `just`。Windows 还需要 PowerShell 7、Visual Studio C++ 桌面工具链；macOS 需要完整 Xcode。将 Flutter 的 `bin` 与 Cargo 加入 `PATH`，或在 Windows 向脚本传入 `-FlutterSdk`。
+
+推荐在仓库根目录使用统一入口：
+
+```text
+just install
+just doctor
+just preview
+just dev
+just test
+just build
+```
+
+`just preview` 使用固定演示数据；`just dev` 会构建 Rust 原生库并启动真实开发会话。Windows 还会提供不启动真实 Codex 的隔离原生验收：
+
+```text
+just native-test
+```
+
+也可以直接调用平台脚本：
 
 ```powershell
-# Windows：在仓库根目录运行
+# Windows
 .\scripts\flutter-windows.ps1 -Action test
 .\scripts\test-native-windows.ps1
 .\scripts\flutter-windows.ps1 -Action build
 ```
 
 ```bash
-# macOS：在仓库根目录运行
+# macOS
 bash scripts/flutter-macos.sh test
 bash scripts/flutter-macos.sh build
 ```

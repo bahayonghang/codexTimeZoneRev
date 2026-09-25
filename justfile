@@ -1,9 +1,7 @@
-# Local entry for Codex 时区启动器.
-# These recipes call the npm scripts in resource/. They do not call Tauri or Cargo directly.
+# Flutter 桌面应用的仓库级统一入口。
+# 具体 SDK 定位、依赖获取、原生构建与打包逻辑由 scripts/ 下的平台脚本负责。
 
-set working-directory := "resource"
-
-# just 在 Windows 上默认调用 sh。常见 PATH 只有 Git\cmd，没有 sh.exe。
+# Windows 常见 PATH 不包含 sh.exe；just 配方只调用 PowerShell 7。
 [windows]
 set shell := ["cmd.exe", "/c"]
 
@@ -12,54 +10,53 @@ set shell := ["cmd.exe", "/c"]
 default:
     @just --list
 
-# 在 resource 安装锁定的 npm 依赖
-install:
-    npm ci --cache ../environment/npm-cache
-
-# 启动当前系统的桌面开发会话
+[private]
 [windows]
-dev:
-    npm run dev:win
+_flutter action:
+    pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/flutter-windows.ps1 -Action {{ action }}
 
-# 启动当前系统的桌面开发会话
 [macos]
-dev:
-    npm run dev:mac
+[private]
+_flutter action:
+    bash scripts/flutter-macos.sh {{ action }}
 
-# 仅支持 Windows 与 macOS
 [linux]
-dev:
+[private]
+_flutter action:
     @echo '仅支持 Windows 与 macOS。' >&2
     @exit 1
 
-# 构建当前系统的发布产物
+# 获取 Flutter 锁定依赖
+install: (_flutter "install")
+
+# 检查 Flutter 与平台开发工具链
+doctor: (_flutter "doctor")
+
+# 使用固定演示数据启动 UI 预览
+preview: (_flutter "preview")
+
+# 构建原生库并启动真实开发会话
+dev: (_flutter "run")
+
+# 运行 Rust、静态分析和 Flutter 测试
+test: (_flutter "test")
+
+# 构建并打包当前平台的发布产物
+build: (_flutter "build")
+
+# 运行 Windows 隔离原生验收，不启动真实 Codex
 [windows]
-build:
-    npm run build:win
+native-test:
+    pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/test-native-windows.ps1
 
-# 构建当前系统的发布产物
+# Windows 隔离原生验收目前没有 macOS 等价脚本
 [macos]
-build:
-    npm run build:mac
-
-# 仅支持 Windows 与 macOS
-[linux]
-build:
-    @echo '仅支持 Windows 与 macOS。' >&2
+native-test:
+    @echo '原生隔离验收脚本目前仅支持 Windows。' >&2
     @exit 1
 
-# 将已构建的桌面应用安装到当前用户
-[windows]
-install-app:
-    npm run install:win
-
-# 将已构建的桌面应用安装到当前用户
-[macos]
-install-app:
-    npm run install:mac
-
 # 仅支持 Windows 与 macOS
 [linux]
-install-app:
+native-test:
     @echo '仅支持 Windows 与 macOS。' >&2
     @exit 1

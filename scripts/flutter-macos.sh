@@ -3,7 +3,14 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 action="${1:-build}"
 cd "$project_root/flutter_app"
+if [[ "$action" == doctor ]]; then
+  flutter doctor -v
+  exit 0
+fi
 flutter pub get
+if [[ "$action" == install ]]; then
+  exit 0
+fi
 export CARGO_TARGET_DIR="$project_root/environment/flutter-cargo-target"
 if [[ "$action" == test ]]; then
   cargo test --manifest-path "$project_root/native/launcher_core/Cargo.toml"
